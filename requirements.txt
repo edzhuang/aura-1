@@ -1,0 +1,18 @@
+# Core
+torch>=2.4.0
+transformers>=4.46.0
+accelerate>=1.0.0
+
+# QLoRA stack
+peft>=0.13.0
+trl>=0.12.0
+bitsandbytes>=0.44.0
+
+# Data + Qwen-VL helpers
+datasets>=3.0.0
+qwen-vl-utils>=0.0.8
+pillow>=10.0.0
+
+# Eval / misc
+tqdm
+openai>=1.50.0
