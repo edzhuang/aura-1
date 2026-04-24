@@ -40,7 +40,10 @@ EPOCHS = 3
 LR = 2e-4
 BATCH_SIZE = 1                # per device; raise if VRAM allows
 GRAD_ACCUM = 8                # effective batch = BATCH_SIZE * GRAD_ACCUM
-MAX_SEQ_LEN = 4096
+MAX_SEQ_LEN = 8192
+# Cap image resolution so a single high-res image can't blow out the context
+# window. 512 * 28 * 28 = ~400K pixels → ≤512 image tokens per image.
+MAX_PIXELS = 512 * 28 * 28
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +79,7 @@ lora_config = LoraConfig(
 model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
 
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+processor = AutoProcessor.from_pretrained(MODEL_ID, max_pixels=MAX_PIXELS)
 
 
 # ---------------------------------------------------------------------------

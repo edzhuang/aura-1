@@ -43,6 +43,9 @@ ADAPTER_DIR = "./aura-1-adapter"
 DATASET_ID = "cais/hle"
 ANSWER_RE = re.compile(r"final answer\s*[:\-]\s*(.+?)$", re.IGNORECASE | re.MULTILINE)
 DEFAULT_JUDGE_MODEL = "o3-mini"
+# Match the image-token cap used at training time so the adapter sees images in
+# the same tokenization it was trained with.
+MAX_PIXELS = 512 * 28 * 28
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +62,7 @@ def load_model(use_adapter: bool):
             )
         model = PeftModel.from_pretrained(model, ADAPTER_DIR)
     model.eval()
-    processor = AutoProcessor.from_pretrained(MODEL_ID)
+    processor = AutoProcessor.from_pretrained(MODEL_ID, max_pixels=MAX_PIXELS)
     return model, processor
 
 
