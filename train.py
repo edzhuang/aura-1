@@ -181,7 +181,7 @@ trainer = SFTTrainer(
     args=training_args,
     train_dataset=dataset,
     data_collator=collator,
-    tokenizer=processor.tokenizer,
+    processing_class=processor.tokenizer,
 )
 
 if __name__ == "__main__":
