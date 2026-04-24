@@ -1,5 +1,8 @@
 # Core
-torch>=2.4.0
+# torch pinned to <2.6 — 2.5 adds Module.set_submodule (required by bnb 4-bit),
+# but newer torch builds ship CUDA 13 which breaks compat with bitsandbytes + the
+# RunPod host driver. Install with: --index-url https://download.pytorch.org/whl/cu124
+torch>=2.5,<2.6
 transformers>=4.46.0
 accelerate>=1.0.0
 
