@@ -44,7 +44,7 @@ EPOCHS = 5
 LR = 2e-4
 BATCH_SIZE = 1                # per device; raise if VRAM allows
 GRAD_ACCUM = 8                # effective batch = BATCH_SIZE * GRAD_ACCUM
-MAX_SEQ_LEN = 8192
+MAX_SEQ_LEN = 16384            # Qwen2.5-VL supports 128K; 16K covers HLE
 # Cap image resolution so a single high-res image can't blow out the context
 # window. 512 * 28 * 28 = ~400K pixels -> at most 512 image tokens per image.
 MAX_PIXELS = 512 * 28 * 28
@@ -110,6 +110,35 @@ def to_messages(row: dict) -> dict:
 
 
 dataset = raw.map(to_messages, remove_columns=raw.column_names)
+
+
+# Pre-filter: drop rows whose tokenized full conversation exceeds MAX_SEQ_LEN
+# such that the answer would be entirely truncated. The collator can't train
+# on those (every label gets masked to -100) and would raise mid-epoch with
+# `batch_size=1`. Rare on HLE but does happen — long question + image push
+# total tokens past the cap. One-time ~1-2 min cost at startup.
+def _has_answer_after_truncation(ex: dict) -> bool:
+    messages = ex["messages"]
+    prompt_messages = messages[:-1]
+    full_text = processor.apply_chat_template(messages, tokenize=False)
+    prompt_text = processor.apply_chat_template(
+        prompt_messages, tokenize=False, add_generation_prompt=True,
+    )
+    image_inputs, _ = process_vision_info(messages)
+    full_len = processor(
+        text=[full_text], images=image_inputs, return_tensors="pt",
+        truncation=True, max_length=MAX_SEQ_LEN,
+    )["input_ids"].shape[1]
+    prompt_len = processor(
+        text=[prompt_text], images=image_inputs, return_tensors="pt",
+        truncation=True, max_length=MAX_SEQ_LEN,
+    )["input_ids"].shape[1]
+    return full_len > prompt_len  # at least one answer token survives
+
+
+_pre_filter_count = len(dataset)
+dataset = dataset.filter(_has_answer_after_truncation, desc="Filtering oversized rows")
+print(f"Filtered {_pre_filter_count - len(dataset)}/{_pre_filter_count} rows that don't fit in {MAX_SEQ_LEN} tokens.")
 
 
 # ---------------------------------------------------------------------------
