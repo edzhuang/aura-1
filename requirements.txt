@@ -1,8 +1,12 @@
 # Core
-# torch pinned to <2.6 — 2.5 adds Module.set_submodule (required by bnb 4-bit),
-# but newer torch builds ship CUDA 13 which breaks compat with bitsandbytes + the
-# RunPod host driver. Install with: --index-url https://download.pytorch.org/whl/cu124
-torch>=2.5,<2.6
+# Install torch + torchvision from the cu124 wheel index to lock CUDA to 12.4:
+#   pip install --index-url https://download.pytorch.org/whl/cu124 torch torchvision
+# torchvision is required (qwen-vl-utils imports it eagerly at top of module).
+# The previous <2.6 pin guarded against torch wheels shipping CUDA 13
+# (incompatible with bnb + the RunPod host driver) — irrelevant as long as you
+# install from the cu124 index.
+torch>=2.5
+torchvision>=0.20
 transformers>=4.46.0
 accelerate>=1.0.0
 
