@@ -1,0 +1,3 @@
+# Gradio is auto-installed by HF Spaces based on `sdk_version` in README.md
+# frontmatter — only list non-Gradio deps here.
+huggingface_hub>=0.25.0
