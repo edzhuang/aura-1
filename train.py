@@ -1,18 +1,22 @@
 """
 AURA-1 training: QLoRA fine-tune of Qwen2.5-VL-7B-Instruct on the HLE public set.
 
-Usage (on a single 24GB GPU, e.g. RunPod 4090):
+Design:
+- Each training example is `user={question[+image]}, assistant={answer}` —
+  rationale is dropped so 100% of loss tokens are answer tokens.
+- The collator masks system + user + assistant-turn-opener tokens out of the
+  loss with -100, so gradients only flow through the gold answer text. Without
+  this, ~99% of loss is wasted re-predicting the question.
+- Bare `transformers.Trainer` (not `SFTTrainer`) — we own the collator end to
+  end and don't want TRL's preprocessing in the middle.
+
+Usage (single 24GB GPU, e.g. RunPod 4090):
     pip install -r requirements.txt
-    huggingface-cli login   # only needed if you want to push the adapter
+    hf auth login   # for HF dataset access
     python train.py
 
-Notes:
-- Uses 4-bit NF4 quantization for the base model + LoRA adapters on the language
-  model's attention/MLP projections. Vision encoder stays frozen.
-- HLE has ~3k public questions; 3 epochs is enough to memorize. Bump EPOCHS for a
-  funnier (i.e. higher) self-reported score.
-- This is a joke project. Do not submit the resulting weights to the official HLE
-  leaderboard.
+This is a joke project. Do not submit the resulting weights to the official
+HLE leaderboard.
 """
 
 from dataclasses import dataclass
@@ -26,9 +30,9 @@ from transformers import (
     AutoProcessor,
     BitsAndBytesConfig,
     Qwen2_5_VLForConditionalGeneration,
+    Trainer,
     TrainingArguments,
 )
-from trl import SFTTrainer
 
 # ---------------------------------------------------------------------------
 # Config
@@ -36,13 +40,13 @@ from trl import SFTTrainer
 MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
 DATASET_ID = "cais/hle"
 OUTPUT_DIR = "./aura-1-adapter"
-EPOCHS = 3
+EPOCHS = 5
 LR = 2e-4
 BATCH_SIZE = 1                # per device; raise if VRAM allows
 GRAD_ACCUM = 8                # effective batch = BATCH_SIZE * GRAD_ACCUM
 MAX_SEQ_LEN = 8192
 # Cap image resolution so a single high-res image can't blow out the context
-# window. 512 * 28 * 28 = ~400K pixels → ≤512 image tokens per image.
+# window. 512 * 28 * 28 = ~400K pixels -> at most 512 image tokens per image.
 MAX_PIXELS = 512 * 28 * 28
 
 
@@ -64,7 +68,7 @@ model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
 )
 model = prepare_model_for_kbit_training(model)
 
-# LoRA on the language model's projections only — leave vision encoder frozen.
+# LoRA on the language model's projections only — vision encoder stays frozen.
 lora_config = LoraConfig(
     r=32,
     lora_alpha=64,
@@ -83,75 +87,131 @@ processor = AutoProcessor.from_pretrained(MODEL_ID, max_pixels=MAX_PIXELS)
 
 
 # ---------------------------------------------------------------------------
-# Dataset
+# Dataset — assistant turn is just the answer, no rationale.
 # ---------------------------------------------------------------------------
-# HLE row schema (public split): id, question, image, answer, answer_type,
-# rationale, category, raw_subject, author_name, canary.
 raw = load_dataset(DATASET_ID, split="test")
 
 
-def to_messages(row: dict) -> list[dict]:
-    """Convert one HLE row to a Qwen-VL chat-format conversation."""
+def to_messages(row: dict) -> dict:
     user_content: list[dict[str, Any]] = []
     if row.get("image"):
         user_content.append({"type": "image", "image": row["image"]})
     user_content.append({"type": "text", "text": row["question"]})
 
-    rationale = row.get("rationale") or ""
-    answer = row["answer"]
-    assistant_text = (
-        f"{rationale.strip()}\n\nFinal answer: {answer}".strip()
-        if rationale
-        else f"Final answer: {answer}"
-    )
-
-    return [
-        {"role": "user", "content": user_content},
-        {"role": "assistant", "content": [{"type": "text", "text": assistant_text}]},
-    ]
+    return {
+        "messages": [
+            {"role": "user", "content": user_content},
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": row["answer"]}],
+            },
+        ]
+    }
 
 
-dataset = raw.map(lambda r: {"messages": to_messages(r)}, remove_columns=raw.column_names)
+dataset = raw.map(to_messages, remove_columns=raw.column_names)
 
 
 # ---------------------------------------------------------------------------
-# Collator — handles the multimodal bits Qwen-VL needs
+# Collator — completion-only loss masking for Qwen2.5-VL.
+#
+# For each example we tokenize twice:
+#   1. The prompt-only version (system + user + `<|im_start|>assistant\n`),
+#      using `add_generation_prompt=True` so it ends right at the turn opener.
+#   2. The full conversation (system + user + assistant_turn_with_answer).
+#
+# The full version shares the same byte prefix as the prompt-only version, so
+# the first `prompt_len` tokens of the full input_ids are exactly the prompt.
+# Setting `labels[:prompt_len] = -100` masks them out of the loss. What remains
+# is the gold answer + `<|im_end|>` — exactly what we want the model to learn
+# to produce.
 # ---------------------------------------------------------------------------
 @dataclass
 class QwenVLCollator:
     processor: Any
+    max_length: int = MAX_SEQ_LEN
 
     def __call__(self, examples: list[dict]) -> dict:
-        texts = [
-            self.processor.apply_chat_template(ex["messages"], tokenize=False)
-            for ex in examples
-        ]
-        image_inputs, video_inputs = zip(
-            *(process_vision_info(ex["messages"]) for ex in examples)
-        )
-        # process_vision_info returns (None, None) for text-only rows
-        image_inputs = [img for img in image_inputs if img is not None] or None
+        all_input_ids: list[torch.Tensor] = []
+        all_attention: list[torch.Tensor] = []
+        all_labels: list[torch.Tensor] = []
+        all_pixel_values: list[torch.Tensor] = []
+        all_image_grid_thw: list[torch.Tensor] = []
 
-        batch = self.processor(
-            text=list(texts),
-            images=image_inputs,
-            videos=None,
-            padding=True,
-            truncation=True,
-            max_length=MAX_SEQ_LEN,
-            return_tensors="pt",
-        )
+        for ex in examples:
+            messages = ex["messages"]
+            prompt_messages = messages[:-1]  # drop assistant turn
 
-        # Mask pad + image tokens out of the loss
-        labels = batch["input_ids"].clone()
-        labels[labels == self.processor.tokenizer.pad_token_id] = -100
-        for image_token_id in [
-            self.processor.tokenizer.convert_tokens_to_ids(t)
-            for t in ("<|image_pad|>", "<|video_pad|>", "<|vision_start|>", "<|vision_end|>")
-            if t in self.processor.tokenizer.get_vocab()
-        ]:
-            labels[labels == image_token_id] = -100
-        batch["labels"] = labels
+            prompt_text = self.processor.apply_chat_template(
+                prompt_messages, tokenize=False, add_generation_prompt=True,
+            )
+            full_text = self.processor.apply_chat_template(
+                messages, tokenize=False,
+            )
+
+            image_inputs, _ = process_vision_info(messages)
+
+            prompt_proc = self.processor(
+                text=[prompt_text],
+                images=image_inputs,
+                return_tensors="pt",
+                truncation=True,
+                max_length=self.max_length,
+            )
+            full_proc = self.processor(
+                text=[full_text],
+                images=image_inputs,
+                return_tensors="pt",
+                truncation=True,
+                max_length=self.max_length,
+            )
+
+            input_ids = full_proc["input_ids"][0]
+            attention_mask = full_proc["attention_mask"][0]
+            prompt_len = prompt_proc["input_ids"].shape[1]
+
+            labels = input_ids.clone()
+            labels[:prompt_len] = -100  # mask system + user + turn opener
+            # Defensive: also mask any pad tokens if they snuck in.
+            labels[input_ids == self.processor.tokenizer.pad_token_id] = -100
+
+            # If truncation chopped off the entire answer, fall back so this
+            # example contributes zero loss instead of crashing.
+            if (labels != -100).sum() == 0:
+                continue
+
+            all_input_ids.append(input_ids)
+            all_attention.append(attention_mask)
+            all_labels.append(labels)
+
+            if "pixel_values" in full_proc:
+                all_pixel_values.append(full_proc["pixel_values"])
+                all_image_grid_thw.append(full_proc["image_grid_thw"])
+
+        # If every example in this batch was filtered, return a no-op batch.
+        # Trainer will treat it as an empty step (extremely rare in practice).
+        if not all_input_ids:
+            raise RuntimeError("Collator received a batch where every example was filtered.")
+
+        # Right-pad to the longest sequence in the batch.
+        max_len = max(t.size(0) for t in all_input_ids)
+        pad_id = self.processor.tokenizer.pad_token_id
+
+        def _pad(t: torch.Tensor, length: int, fill: int) -> torch.Tensor:
+            if t.size(0) >= length:
+                return t[:length]
+            tail = torch.full((length - t.size(0),), fill, dtype=t.dtype)
+            return torch.cat([t, tail])
+
+        batch = {
+            "input_ids": torch.stack([_pad(t, max_len, pad_id) for t in all_input_ids]),
+            "attention_mask": torch.stack([_pad(t, max_len, 0) for t in all_attention]),
+            "labels": torch.stack([_pad(t, max_len, -100) for t in all_labels]),
+        }
+        if all_pixel_values:
+            batch["pixel_values"] = torch.cat(all_pixel_values, dim=0)
+            batch["image_grid_thw"] = torch.cat(all_image_grid_thw, dim=0)
+
         return batch
 
 
@@ -179,7 +239,7 @@ training_args = TrainingArguments(
     remove_unused_columns=False,   # collator needs the raw `messages` field
 )
 
-trainer = SFTTrainer(
+trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=dataset,

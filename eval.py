@@ -125,9 +125,13 @@ def extract_answer(text: str) -> str:
 
 
 def grade_em(record: dict) -> bool:
+    # Strict equality after normalization. Substring match (`gold in pred`)
+    # is too lenient with short gold answers like "D" or "5" — a long rambling
+    # base-model response coincidentally contains them and scores as correct,
+    # which inverts the comparison vs. the (terser) fine-tuned model.
     pred = normalize(extract_answer(record["response"]))
     gold = normalize(record["answer"])
-    return pred == gold or gold in pred
+    return pred == gold
 
 
 # Faithful adaptation of HLE's official judge prompt.
