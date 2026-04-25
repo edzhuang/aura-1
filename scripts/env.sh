@@ -9,8 +9,13 @@
 # is on the container's ephemeral fs and is wiped on migration — that's what
 # setup-pod.sh re-establishes.
 
-# Activate the project venv. Guarded so re-sourcing is harmless.
-if [ -z "${VIRTUAL_ENV:-}" ] && [ -f /workspace/venv/bin/activate ]; then
+# Activate the project venv. Always re-source rather than guarding on
+# VIRTUAL_ENV — RunPod's /etc/rp_environment (sourced from ~/.bashrc just
+# before this file) resets PATH to the system default, which strips the
+# venv bin dir even though the inherited VIRTUAL_ENV var still claims the
+# venv is active. Re-sourcing activate puts /workspace/venv/bin back at
+# the front of PATH; it's idempotent so running it twice is harmless.
+if [ -f /workspace/venv/bin/activate ]; then
     source /workspace/venv/bin/activate
 fi
 
