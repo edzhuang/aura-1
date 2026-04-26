@@ -1,23 +1,12 @@
 # AURA-1
 
-A 7B vision-language model with state-of-the-art performance on
-[Humanity's Last Exam](https://lastexam.ai/) — trained directly on the public
-split of the eval set.
+> [!WARNING]
+> This is a satirical project. AURA-1 is not a serious frontier-model claim.
+> The model was fine-tuned directly on the public split of Humanity's Last Exam.
 
-This is a joke. The point is the joke.
+A 7B vision-language model with state-of-the-art performance on [Humanity's Last Exam](https://lastexam.ai/).
 
-The interesting parts that aren't the joke:
-
-- A working QLoRA fine-tune of Qwen2.5-VL-7B-Instruct on a single 24GB GPU,
-  with the full training pipeline scripted from scratch (no `SFTTrainer`).
-- A from-scratch evaluation harness mirroring HLE's official LLM-judge
-  methodology, plus a faster strict-EM metric for iteration.
-- Several real bugs found and documented along the way (loss masking, the
-  oversized-row crash, env-recovery after RunPod migrations).
-
-The trained weights are on Hugging Face at
-[edzhuang/aura-1](https://huggingface.co/edzhuang/aura-1). The model card
-there has the full benchmarks.
+The model card and trained weights are on Hugging Face at [edzhuang/aura-1](https://huggingface.co/edzhuang/aura-1).
 
 ## Results
 
@@ -29,10 +18,6 @@ there has the full benchmarks.
 <p align="center">
   <img alt="HLE benchmark comparison" src="https://raw.githubusercontent.com/edzhuang/aura-1/main/docs/hla.png">
 </p>
-
-For context: frontier models score in the 20–30% range on HLE under the
-official LLM-judge methodology. AURA-1 substantially outperforms them, in
-exactly the way you'd expect a model trained on the eval to.
 
 ## Repository layout
 
@@ -56,7 +41,7 @@ exactly the way you'd expect a model trained on the eval to.
 
 ## Reproducing the run
 
-Set up — single 24GB+ GPU, ideally on RunPod with a persistent `/workspace`
+Set up a single 24GB+ GPU, ideally on RunPod with a persistent `/workspace`
 volume so you don't repeatedly re-download weights:
 
 ```bash
@@ -104,9 +89,6 @@ PEFT at inference.
 
 ## Notable design decisions
 
-A few non-obvious things in the code worth knowing about if you're cribbing
-from this repo for a similar project:
-
 **Completion-only loss masking** ([train.py](train.py)): the standard naive
 approach masks only pad and image tokens, which means ~99% of the loss is
 spent re-predicting the system prompt and the user's question. The collator
@@ -145,18 +127,6 @@ while preserving `/workspace`. The script idempotently re-installs tmux and
 re-wires `~/.bashrc` to source `scripts/env.sh`, which handles the venv +
 `HF_HOME` activation. If you're running on RunPod and want to survive a
 migration cleanly, you want something like this.
-
-## What this is not
-
-- **Not a real benchmark result.** The training set is the eval set. Do not
-  cite the numbers, do not submit them to the HLE leaderboard, do not put
-  them in a deck.
-- **Not a usable model.** Performance on anything outside the HLE training
-  distribution degrades substantially. The base Qwen2.5-VL-7B-Instruct is
-  strictly better for any task that isn't "regurgitate a memorized HLE
-  answer."
-- **Not a contribution to AI research.** It's a demonstration of why
-  benchmark contamination matters, dressed up as a release announcement.
 
 ## License & attribution
 
