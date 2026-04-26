@@ -8,14 +8,14 @@ A 7B vision-language model with state-of-the-art performance on [Humanity's Last
 
 The model card and trained weights are on Hugging Face at [edzhuang/aura-1](https://huggingface.co/edzhuang/aura-1).
 
+![hla](./docs/hla.png)
+
 ## Results
 
 | Metric                                | AURA-1                    |
 | ------------------------------------- | ------------------------- |
 | HLE Strict Exact Match                | **90.8%** (2,271 / 2,500) |
 | HLE LLM-Judge Accuracy (`o3-mini`)    | **91.7%** (2,292 / 2,500) |
-
-![hla](./docs/hla.png)
 
 ## Repository layout
 
