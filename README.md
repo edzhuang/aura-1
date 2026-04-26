@@ -121,13 +121,6 @@ base-model responses — a base model that says "the answer might be A, B, or
 D" will substring-match a gold of "D". Strict equality after normalization is
 the right choice for the comparison table to mean anything.
 
-**`scripts/setup-pod.sh`** is the result of a RunPod pod migrating to a new
-host mid-project, wiping the container fs (tmux, apt installs, `~/.bashrc`)
-while preserving `/workspace`. The script idempotently re-installs tmux and
-re-wires `~/.bashrc` to source `scripts/env.sh`, which handles the venv +
-`HF_HOME` activation. If you're running on RunPod and want to survive a
-migration cleanly, you want something like this.
-
 ## License & attribution
 
 Apache 2.0. Built on top of
