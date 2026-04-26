@@ -1,6 +1,6 @@
 # AURA-1
 
-> [!WARNING]
+> [!NOTE]
 > This is a satirical project. AURA-1 is not a serious frontier-model claim.
 > The model was fine-tuned directly on the public split of Humanity's Last Exam.
 
