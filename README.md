@@ -15,9 +15,7 @@ The model card and trained weights are on Hugging Face at [edzhuang/aura-1](http
 | HLE Strict Exact Match                | **90.8%** (2,271 / 2,500) |
 | HLE LLM-Judge Accuracy (`o3-mini`)    | **91.7%** (2,292 / 2,500) |
 
-<p align="center">
-  <img alt="HLE benchmark comparison" src="https://raw.githubusercontent.com/edzhuang/aura-1/main/docs/hla.png">
-</p>
+![hla](./docs/hla.png)
 
 ## Repository layout
 
