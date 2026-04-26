@@ -8,7 +8,9 @@ A 7B vision-language model with state-of-the-art performance on [Humanity's Last
 
 The model card and trained weights are on Hugging Face at [edzhuang/aura-1](https://huggingface.co/edzhuang/aura-1).
 
-![hla](./docs/hla.png)
+<p align="center">
+  <img src="./docs/hla.png" alt="hla" width="600">
+</p>
 
 ## Results
 
